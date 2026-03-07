@@ -1083,6 +1083,63 @@ app.get('/setup', async (req, res) => {
   }
 });
 
+// ── Add skin-analyzer section to homepage ───────────────
+function shopifyGet(path, token) {
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: SHOPIFY_SHOP, path, method: 'GET',
+      headers: { 'X-Shopify-Access-Token': token }
+    }, (res) => {
+      let d = '';
+      res.on('data', c => d += c);
+      res.on('end', () => resolve({ status: res.statusCode, body: d }));
+    });
+    req.on('error', reject); req.end();
+  });
+}
+
+app.get('/add-section', async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.status(400).json({ error: 'Param ?code= manquant' });
+  try {
+    const tokenResp = await shopifyPost('/admin/oauth/access_token', {
+      client_id: CLIENT_ID, client_secret: CLIENT_SECRET, code
+    });
+    const tokenData = JSON.parse(tokenResp.body);
+    if (!tokenData.access_token)
+      return res.status(400).json({ error: 'Token exchange echoue', raw: tokenResp.body });
+
+    const token = tokenData.access_token;
+    const assetPath = '/admin/api/2024-01/themes/' + SHOPIFY_THEME_ID + '/assets.json?asset%5Bkey%5D=templates%2Findex.json';
+    const getResp = await shopifyGet(assetPath, token);
+    const getData = JSON.parse(getResp.body);
+    if (!getData.asset) return res.status(400).json({ error: 'Template not found', raw: getResp.body });
+
+    const template = JSON.parse(getData.asset.value);
+    const sectionId = 'skin-analyzer-' + Date.now();
+    template.sections[sectionId] = {
+      type: 'skin-analyzer',
+      settings: {
+        title: 'Analysez votre peau avec l\'IA',
+        subtitle: 'Obtenez une analyse personnalisee en 30 secondes'
+      }
+    };
+    if (!template.order) template.order = [];
+    template.order.push(sectionId);
+
+    const putPath = '/admin/api/2024-01/themes/' + SHOPIFY_THEME_ID + '/assets.json';
+    const putResp = await shopifyPut(
+      putPath,
+      { asset: { key: 'templates/index.json', value: JSON.stringify(template, null, 2) } },
+      token
+    );
+    const ok = putResp.status === 200;
+    res.json({ success: ok, sectionId, status: putResp.status });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── Health check ─────────────────────────────────────────
 app.get('/api/health', (req, res) => {
   res.json({
