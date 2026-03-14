@@ -1140,6 +1140,33 @@ app.get('/add-section', async (req, res) => {
   }
 });
 
+// ── Remove skin-analyzer sections from homepage ─────────
+app.get('/remove-section', async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.status(400).json({ error: 'Param ?code= manquant' });
+  try {
+    const tokenResp = await shopifyPost('/admin/oauth/access_token', {
+      client_id: CLIENT_ID, client_secret: CLIENT_SECRET, code
+    });
+    const tokenData = JSON.parse(tokenResp.body);
+    if (!tokenData.access_token) return res.status(400).json({ error: 'Token exchange echoue', raw: tokenResp.body });
+    const token = tokenData.access_token;
+    const assetPath = '/admin/api/2024-01/themes/' + SHOPIFY_THEME_ID + '/assets.json?asset%5Bkey%5D=templates%2Findex.json';
+    const getResp = await shopifyGet(assetPath, token);
+    const getData = JSON.parse(getResp.body);
+    if (!getData.asset) return res.status(400).json({ error: 'Template not found', raw: getResp.body });
+    const template = JSON.parse(getData.asset.value);
+    const removed = Object.keys(template.sections || {}).filter(k => k.startsWith('skin-analyzer'));
+    removed.forEach(k => delete template.sections[k]);
+    template.order = (template.order || []).filter(k => !k.startsWith('skin-analyzer'));
+    const putPath = '/admin/api/2024-01/themes/' + SHOPIFY_THEME_ID + '/assets.json';
+    const putResp = await shopifyPut(putPath, { asset: { key: 'templates/index.json', value: JSON.stringify(template, null, 2) } }, token);
+    res.json({ success: putResp.status === 200, removed, status: putResp.status });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── Health check ─────────────────────────────────────────
 app.get('/api/health', (req, res) => {
   res.json({
